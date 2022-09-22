@@ -21,7 +21,7 @@ import numpy as np
 from medpy.metric import dc,hd95
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--batch_size", default=12, help="batch size")
+parser.add_argument("--batch_size", default=8, help="batch size")
 parser.add_argument("--lr", default=0.0001, help="learning rate")
 parser.add_argument("--max_epochs", default=100)
 parser.add_argument("--img_size", default=224)
