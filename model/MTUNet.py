@@ -6,6 +6,10 @@ import numpy as np
 import torch
 from torch import nn
 
+import hyperparams as param
+import modules
+import tensorflow as tf
+
 
 class ConvBNReLU(nn.Module):
     def __init__(self,
