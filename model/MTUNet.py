@@ -108,6 +108,100 @@ class U_decoder(nn.Module):
         x = self.res3(x)
         return x
 
+def Gaussion_selfAttention(queries,
+                           keys,
+                           shift,
+                           bias,
+                           num_units,
+                           scope="Gaussion_selfAttention",
+                           num_heads=8,
+                           dropout_rate=0,
+                           is_training=True,
+                           causality=False,
+                           reuse=None,
+                           if_Gausssion=True):
+    with tf.variable_scope(scope, reuse=reuse):
+
+        # Linear projections
+        Q = tf.layers.dense(queries, num_units, activation=tf.nn.relu)  # (N, T_q, C)
+        K = tf.layers.dense(keys, num_units, activation=tf.nn.relu)  # (N, T_k, C)
+        V = tf.layers.dense(keys, num_units, activation=tf.nn.relu)  # (N, T_k, C)
+
+        # Split and concat
+        Q_ = tf.concat(tf.split(Q, num_heads, axis=2), axis=0)  # (h*N, T_q, C/h)
+        K_ = tf.concat(tf.split(K, num_heads, axis=2), axis=0)  # (h*N, T_k, C/h)
+        V_ = tf.concat(tf.split(V, num_heads, axis=2), axis=0)  # (h*N, T_k, C/h)
+
+        # Multiplication
+        outputs = tf.matmul(Q_, tf.transpose(K_, [0, 2, 1]))  # (h*N, T_q, T_k)
+        outputs = tf.check_numerics(outputs, "Gaussion self-attention  step 1 is nan")
+
+        Nq, T_q, Cq = Q.get_shape().as_list()
+        Nk, T_k, Ck = K.get_shape().as_list()
+        assert Nq == Nk, ValueError(
+            "The number of queries is not equal to that of keys, they are {0}, and {1}".format(Nq, Nk))
+        # Scale + Gaussion prior
+        if if_Gausssion:
+            Dis_M = np.zeros(shape=[T_q, T_k])
+            for i in range(T_q):
+                for j in range(T_k):
+                    Dis_M[i][j] = (i - j) ** 2
+            dis_M = tf.convert_to_tensor(Dis_M,dtype=tf.float64)
+
+            shift_M = tf.tile(tf.tile(tf.expand_dims(shift,0), [T_q, 1]),[1, T_k])
+            bias_M = tf.tile(tf.tile(tf.expand_dims(bias, 0), [T_q, 1]),[1, T_k])
+
+            dis_M = -(shift_M * dis_M + bias_M)
+            dis_M_ = tf.tile(tf.expand_dims(dis_M, 0), [Nq * num_heads, 1, 1])  # (h * N, T_q, T_k)
+
+            outputs = (dis_M_ + outputs) / (K_.get_shape().as_list()[-1] ** 0.5)  # (h * N, T_q, T_k)
+
+            outputs = tf.check_numerics(outputs,"Gaussion self-attention  step 2 is nan")
+        else:
+            outputs = outputs / (K_.get_shape().as_list()[-1] ** 0.5)
+
+        # # Key Masking
+        # key_masks = tf.sign(tf.abs(tf.reduce_sum(keys, axis=-1))) # (N, T_k)
+        # key_masks = tf.tile(key_masks, [num_heads, 1]) # (h*N, T_k)
+        # key_masks = tf.tile(tf.expand_dims(key_masks, 1), [1, tf.shape(queries)[1], 1]) # (h*N, T_q, T_k)
+        #
+        # paddings = tf.ones_like(outputs)*(-2**32+1)
+        # outputs = tf.where(tf.equal(key_masks, 0), paddings, outputs) # (h*N, T_q, T_k)
+
+        # Causality = Future blinding
+        if causality:
+            diag_vals = tf.ones_like(outputs[0, :, :])  # (T_q, T_k)
+            tril = tf.contrib.linalg.LinearOperatorTriL(diag_vals).to_dense()  # (T_q, T_k)
+            masks = tf.tile(tf.expand_dims(tril, 0), [tf.shape(outputs)[0], 1, 1])  # (h*N, T_q, T_k)
+
+            paddings = tf.ones_like(masks) * (-2 ** 32 + 1)
+            outputs = tf.where(tf.equal(masks, 0), paddings, outputs)  # (h*N, T_q, T_k)
+
+        # Activation
+        outputs = tf.nn.softmax(outputs)  # (h*N, T_q, T_k)
+        outputs = tf.check_numerics(outputs, "Gaussion self-attention  step 3 is nan")
+
+        # # Query Masking
+        # query_masks = tf.sign(tf.abs(tf.reduce_sum(queries, axis=-1))) # (N, T_q)
+        # query_masks = tf.tile(query_masks, [num_heads, 1]) # (h*N, T_q)
+        # query_masks = tf.tile(tf.expand_dims(query_masks, -1), [1, 1, tf.shape(keys)[1]]) # (h*N, T_q, T_k)
+        # outputs *= query_masks # broadcasting. (N, T_q, C)
+        #
+        # Dropouts
+        # outputs = tf.layers.dropout(outputs, rate=dropout_rate, training=is_training)
+        outputs = tf.check_numerics(outputs, "Gaussion self-attention  step 4 is nan")
+
+        # Weighted sum
+        outputs = tf.matmul(outputs, V_)  # ( h*N, T_q, C/h)
+        outputs = tf.check_numerics(outputs, "Gaussion self-attention  step 5 is nan")
+
+        # add and layer norm
+        outputs = tf.concat(tf.split(outputs, num_heads, axis=0), axis=2)  # (h, T_q, C)
+        outputs += queries
+        outputs = tf.check_numerics(outputs, "Gaussion self-attention  step 6 is nan")
+        outputs = normalize(outputs)  # (N, T_q, C)
+        outputs = tf.check_numerics(outputs, "Gaussion self-attention  step 7 is nan")
+    return outputs
 
 class MEAttention(nn.Module):
     def __init__(self, dim, configs):
