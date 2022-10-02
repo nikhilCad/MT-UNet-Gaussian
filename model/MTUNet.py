@@ -447,6 +447,7 @@ class EAmodule(nn.Module):
         self.ElayerNorm = nn.LayerNorm(dim, eps=1e-6)
         self.CSAttention = CSAttention(dim, configs)
         self.EAttention = MEAttention(dim, configs)
+        self.Gaussion_selfAttention = Gaussion_selfAttention(dim, configs)
 
     def forward(self, x):
         h = x  # (B, N, H)
