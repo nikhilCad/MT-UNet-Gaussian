@@ -6,8 +6,8 @@ import numpy as np
 import torch
 from torch import nn
 
-import hyperparams as param
-import modules
+import .hyperparams as param
+import .modules
 import tensorflow as tf
 
 
